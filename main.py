@@ -17,7 +17,7 @@ def listening(list -> arguments):
                 break
             if line[0] != "UPDATE":
                 break
-            
+            #source
             source_node = line[1]
             i = 1
             while i < len(line):

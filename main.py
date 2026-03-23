@@ -6,10 +6,10 @@ import socket
 
 graph = {}
 
-def listening(list -> arguments):
+def listening(arguments):
     while True:
         try:
-            line = input()
+            line = input().strip().split()
             print("Received: ", line)
             
             if len(line) < 3:
@@ -17,17 +17,33 @@ def listening(list -> arguments):
                 break
             if line[0] != "UPDATE":
                 break
-            #source
+            
             source_node = line[1]
-            i = 1
-            while i < len(line):
+            neighbours_raw = line[2]
+            neighbours = neighbours_raw.split(",")
+        
+            graph[source_node] = {}
                 
-                i+=1
+            for n in neighbours:
+                node, cost, port = n.split(":")
+                cost = float(cost)
+                port = int(port)
+                
+                if node not in graph:
+                    graph[node] = {}
+                
+                graph[source_node][node] = (cost, port)
+                graph[node][source_node] = (cost, port)
+    
             
         except EOFError:
             print("Error in input")
             break
     return
+
+def sendThread(arguments):
+    
+    return False
     
 
 def main():

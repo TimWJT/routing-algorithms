@@ -61,25 +61,55 @@ def dijkstras(starting_node):
     dist = {}
     visited = set()
     
+    # Initialise
     for node in graph:
         dist[node] = float('inf')
         prev[node] = None
     
     dist[starting_node] = 0
-    
-    
-    for n in graph[current_node]:
-        cost, port = graph[current_node][n]
-        
-        new_dist = dist[current_node] + cost
-        
-        if new_dist < dist[n]:
-            dist[n] = new_dist
-            prev[n] = current_node
-              
+
+    # Main loop
+    while len(visited) < len(graph):
+        # Find closest unvisited node
+        current_node = None
+        smallest_distance = float('inf')
+
+        for node in graph:
+            if node not in visited and dist[node] < smallest_distance:
+                smallest_distance = dist[node]
+                current_node = node
+
+        visited.add(current_node)
+
+        # Relax neighbours
+        for neighbour in graph[current_node]:
+            cost, port = graph[current_node][neighbour]
             
-    return path
-       
+            new_dist = dist[current_node] + cost
+            
+            if new_dist < dist[neighbour]:
+                dist[neighbour] = new_dist
+                prev[neighbour] = current_node
+              
+    return dist, prev
+    
+    
+def get_path(prev, start_node, destination_node):
+    
+    
+    least_cost_path = ""
+    
+    current_node = destination_node
+    
+    least_cost_path += destination_node
+    
+    while prev[current_node] != None:
+        least_cost_path += prev[current_node]
+        current_node = prev[current_node]
+        
+    
+    return f"Least cost path from {start_node} to {destination_node}"
+    
 
 def main():
     """

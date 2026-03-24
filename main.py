@@ -42,7 +42,7 @@ def listening():
             break
     return
 
-def broadcast_updates(update_interval ,node_id):
+def broadcast_updates(update_interval, stop_event, node_id):
     while not broadcast_updates.is_set():
         
         update_message = f"UPDATE {node_id}"
@@ -50,12 +50,14 @@ def broadcast_updates(update_interval ,node_id):
         
         for n in graph[node_id]:
             cost, port = graph[node_id][n]
-            update_message += graph[node_id][n] + ":" + cost + ":" + port
-        
+            update_message += f"{n}:{cost}:{port}"        
         
         
         print(update_message) 
+        
+        stop_event.wait(update_interval)
         stopped = broadcast_updates.wait(update_interval)
+        
         
         if stopped:
             break
@@ -114,6 +116,8 @@ def get_path(prev, destination_node):
     
 def read_config(node_config_file):
     
+    neighbouring_nodes = []
+    
     with open(node_config_file, "r") as file:
         
         
@@ -126,20 +130,39 @@ def read_config(node_config_file):
                 continue
             
             node_id, cost, port_no = line.split(" ")
-        
+            neighbouring_nodes.append(line.pslit(" "))
             
-    return
+    return neighbouring_nodes
 
-def handle_routing(routing_delay, starting_node, destination_node):
-    while not handle_routing.is_set():
+def handle_routing(routing_delay, stop_event, starting_node, destination_node):
+    while not stop_event.is_set():
     
         dist, prev = dijkstras(starting_node)
         path = get_path(prev, destination_node)
+        
+        stop_event.wait(routing_delay)
         
         stopped = handle_routing.wait(routing_delay)
         
         if stopped:
             break
+
+def update_graph(neighbouring_nodes, source_node):
+    
+    if graph[source_node] not in graph:
+        graph[source_node] = {}
+    
+    for node_id, cost, port_no in neighbouring_nodes:
+        cost = float(cost)
+        port = int(port)
+        if node_id not in graph:
+            graph[node_id] = {}
+        
+        graph[source_node][node_id] = (cost, port)
+        graph[node_id][source_node] = (cost, port)
+        
+    return
+
 
 def main():
     """
@@ -166,24 +189,33 @@ casts the current update packet via STDOUT.
     routing_delay = sys.argv[4]
     update_interval = sys.argv[5]
     
-    read_config(node_config_file)
-    listening(input_arguments)
-  
+    neighbouring_nodes = read_config(node_config_file)
+    
+    update_graph(neighbouring_nodes, node_id)
+    
+    
+    master_stop = threading.Event()
+    
     # The Listening Thread: Monitors the "outside world" (STDIN for user commands and Sockets for other nodes).
 
-    listening_thread = threading.Thread(target = listening, args = (), daemon = True)
-    
+    listening_thread = threading.Thread(target = listening, args = (master_stop), daemon = True)
+    listening_thread.start()
     # The Sending Thread: Wakes up every UpdateInterval seconds to shout your status to your neighbors.
 
 
-    sending_thread = threading.Thread(target = broadcast_updates, args = (update_interval, node_id), daemon = True)
-    
+    sending_thread = threading.Thread(target = broadcast_updates, args = (update_interval, master_stop, node_id), daemon = True)
+    sending_thread.start()
     # The Routing Thread: Periodically (or on-demand) runs your Dijkstra logic and prints the table.
-    starting_node = ""
     destination_node = ""
     #r
-    routing_thread = threading.Thread(target = handle_routing, args = (routing_delay, starting_node, destination_node), daemon = True)
-
+    routing_thread = threading.Thread(target = handle_routing, args = (routing_delay, master_stop, node_id, destination_node), daemon = True)
+    routing_thread.start()
+    
+    
+    
+    listening_thread.join(daemon= True)
+    sending_thread.join(daemon= True)
+    routing_thread.join(daemon= True)
     
 if __name__ == "__main__":
     main()

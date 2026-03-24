@@ -181,7 +181,7 @@ casts the current update packet via STDOUT.
     # The Routing Thread: Periodically (or on-demand) runs your Dijkstra logic and prints the table.
     starting_node = ""
     destination_node = ""
-    
+    #r
     routing_thread = threading.Thread(target = handle_routing, args = (routing_delay, starting_node, destination_node), daemon = True)
 
     

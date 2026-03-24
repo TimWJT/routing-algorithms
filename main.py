@@ -3,6 +3,7 @@ import os
 import threading
 import time
 import socket
+import heapq
 
 graph = {}
 
@@ -41,10 +42,44 @@ def listening(arguments):
             break
     return
 
-def sendThread(arguments):
+def sendThread(node_id):
     
-    return False
     
+    update_message = f"UPDATE {node_id}"
+    
+    
+    for n in graph[node_id]:
+        cost, port = graph[node_id][n]
+        update_message += graph[node_id][n] + ":" + cost + ":" + port
+    
+    
+    
+    print(update_message) 
+    
+def dijkstras(starting_node):
+    prev = {}
+    dist = {}
+    visited = set()
+    
+    for node in graph:
+        dist[node] = float('inf')
+        prev[node] = None
+    
+    dist[starting_node] = 0
+    
+    
+    for n in graph[current_node]:
+        cost, port = graph[current_node][n]
+        
+        new_dist = dist[current_node] + cost
+        
+        if new_dist < dist[n]:
+            dist[n] = new_dist
+            prev[n] = current_node
+              
+            
+    return path
+       
 
 def main():
     """
@@ -65,10 +100,11 @@ casts the current update packet via STDOUT.
         print(f"Error: Insufficient arguments provided. Usage: ./Routing.sh <Node-ID> <Port-NO> <Node-Config-File> <RoutingDelay> <UpdateInterval>")
         sys.exit(1)
         
-    port_number = sys.argv[1]
-    node_config_file = sys.argv[2]
-    routing_delay = sys.argv[3]
-    update_interval = sys.argv[4]
+    node_id = sys.argv[1]
+    port_number = sys.argv[2]
+    node_config_file = sys.argv[3]
+    routing_delay = sys.argv[4]
+    update_interval = sys.argv[5]
     
     listening(input_arguments)
     

@@ -97,19 +97,34 @@ def dijkstras(starting_node):
 def get_path(prev, start_node, destination_node):
     
     
-    least_cost_path = ""
+    least_cost_path = []
     
     current_node = destination_node
-    
-    least_cost_path += destination_node
-    
+        
     while prev[current_node] != None:
-        least_cost_path += prev[current_node]
+        least_cost_path.append(prev[current_node])
         current_node = prev[current_node]
         
+    least_cost_path.reverse()
+    return ''.join(least_cost_path)
     
-    return f"Least cost path from {start_node} to {destination_node}"
+def read_config(node_config_file):
     
+    with open(node_config_file, "r") as file:
+        
+        
+        neighbour_entries = int(next(file).strip())
+        
+        for line in file:
+            line = line.strip()
+            
+            if line == "":
+                continue
+            
+            node_id, cost, port_no = line.split(" ")
+        
+            
+    return
 
 def main():
     """
@@ -137,6 +152,12 @@ casts the current update packet via STDOUT.
     update_interval = sys.argv[5]
     
     listening(input_arguments)
+  
+    # The Listening Thread: Monitors the "outside world" (STDIN for user commands and Sockets for other nodes).
+
+    # The Sending Thread: Wakes up every UpdateInterval seconds to shout your status to your neighbors.
+
+    # The Routing Thread: Periodically (or on-demand) runs your Dijkstra logic and prints the table.
     
     
 if __name__ == "__main__":

@@ -7,7 +7,7 @@ import heapq
 
 graph = {}
 
-def listening(arguments):
+def listening():
     while True:
         try:
             line = input().strip().split()
@@ -42,19 +42,23 @@ def listening(arguments):
             break
     return
 
-def sendThread(node_id):
-    
-    
-    update_message = f"UPDATE {node_id}"
-    
-    
-    for n in graph[node_id]:
-        cost, port = graph[node_id][n]
-        update_message += graph[node_id][n] + ":" + cost + ":" + port
-    
-    
-    
-    print(update_message) 
+def broadcast_updates(update_interval ,node_id):
+    while not broadcast_updates.is_set():
+        
+        update_message = f"UPDATE {node_id}"
+        
+        
+        for n in graph[node_id]:
+            cost, port = graph[node_id][n]
+            update_message += graph[node_id][n] + ":" + cost + ":" + port
+        
+        
+        
+        print(update_message) 
+        stopped = broadcast_updates.wait(update_interval)
+        
+        if stopped:
+            break
     
 def dijkstras(starting_node):
     prev = {}
@@ -94,7 +98,7 @@ def dijkstras(starting_node):
     return dist, prev
     
     
-def get_path(prev, start_node, destination_node):
+def get_path(prev, destination_node):
     
     
     least_cost_path = []
@@ -126,6 +130,17 @@ def read_config(node_config_file):
             
     return
 
+def handle_routing(routing_delay, starting_node, destination_node):
+    while not handle_routing.is_set():
+    
+        dist, prev = dijkstras(starting_node)
+        path = get_path(prev, destination_node)
+        
+        stopped = handle_routing.wait(routing_delay)
+        
+        if stopped:
+            break
+
 def main():
     """
     Node-ID is a unique identifier (e.g. A, B, C, ...).
@@ -155,10 +170,19 @@ casts the current update packet via STDOUT.
   
     # The Listening Thread: Monitors the "outside world" (STDIN for user commands and Sockets for other nodes).
 
+    listening_thread = threading.Thread(target = listening, args = (), daemon = True)
+    
     # The Sending Thread: Wakes up every UpdateInterval seconds to shout your status to your neighbors.
 
-    # The Routing Thread: Periodically (or on-demand) runs your Dijkstra logic and prints the table.
+
+    sending_thread = threading.Thread(target = broadcast_updates, args = (update_interval, node_id), daemon = True)
     
+    # The Routing Thread: Periodically (or on-demand) runs your Dijkstra logic and prints the table.
+    starting_node = ""
+    destination_node = ""
+    
+    routing_thread = threading.Thread(target = handle_routing, args = (routing_delay, starting_node, destination_node), daemon = True)
+
     
 if __name__ == "__main__":
     main()

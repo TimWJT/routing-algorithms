@@ -20,7 +20,7 @@ def listening_stdin(node_id, master_stop):
                 source_node = line[1]
                 neighbours_raw = line[2]
                 neighbours = neighbours_raw.split(",")
-            
+
                 graph[source_node] = {}
                     
                 for n in neighbours:
@@ -68,7 +68,7 @@ def listening_network(my_socket, stop_event):
                 graph[source_node] = {}
                     
                 for n in neighbours:
-                    node, cost, port = n.parts(":")
+                    node, cost, port = n.split(":")
                     cost = float(cost)
                     port = int(port)
                     
@@ -83,7 +83,7 @@ def listening_network(my_socket, stop_event):
                 print(f"Network error: {e}")
             break
 
-def broadcast_updates(update_interval, stop_event, node_id):
+def broadcast_updates(update_interval, stop_event, node_id, my_socket):
     while not stop_event.is_set():
         
         update_message = f"UPDATE {node_id}"
@@ -91,13 +91,15 @@ def broadcast_updates(update_interval, stop_event, node_id):
         
         for n in graph[node_id]:
             cost, port = graph[node_id][n]
-            update_message += f"{n}:{cost}:{port}"        
+            update_message += f" {n}:{cost}:{port},"        
         
-        
+        for n in graph[node_id]:
+            cost, port = graph[node_id][n]
+            my_socket.sendto(update_message.encode(), ("localhost", port))
+            
         print(update_message) 
         
-        stop_event.wait(update_interval)
-        stopped = broadcast_updates.wait(update_interval)
+        stopped = stop_event.wait(update_interval)
         
         
         if stopped:
@@ -181,9 +183,8 @@ def handle_routing(routing_delay, stop_event, starting_node, destination_node):
         dist, prev = dijkstras(starting_node)
         path = get_path(prev, destination_node)
         
-        stop_event.wait(routing_delay)
         
-        stopped = handle_routing.wait(routing_delay)
+        stopped = stop_event.wait(routing_delay)
         
         if stopped:
             break
@@ -227,8 +228,8 @@ casts the current update packet via STDOUT.
     node_id = sys.argv[1]
     port_number = sys.argv[2]
     node_config_file = sys.argv[3]
-    routing_delay = sys.argv[4]
-    update_interval = sys.argv[5]
+    routing_delay = float(sys.argv[4])
+    update_interval = float(sys.argv[5])
     
     neighbouring_nodes = read_config(node_config_file)
     
@@ -237,8 +238,7 @@ casts the current update packet via STDOUT.
     
     # socket stuff
     my_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    my_socket.bind(('localhost', port_number))
-    
+    my_socket.bind(('localhost', int(port_number)))    
     
     
     # threadding stuff
@@ -246,12 +246,12 @@ casts the current update packet via STDOUT.
     
     # The Listening Thread: Monitors the "outside world" (STDIN for user commands and Sockets for other nodes).
 
-    listening_thread_stdin = threading.Thread(target = listening_stdin, args = (master_stop,), daemon = True)
+    listening_thread_stdin = threading.Thread(target = listening_stdin, args = (node_id, master_stop,), daemon = True)
     listening_thread_network = threading.Thread(target = listening_network, args = (my_socket, master_stop,), daemon = True)
     # The Sending Thread: Wakes up every UpdateInterval seconds to shout your status to your neighbors.
 
 
-    sending_thread = threading.Thread(target = broadcast_updates, args = (update_interval, master_stop, node_id), daemon = True)
+    sending_thread = threading.Thread(target = broadcast_updates, args = (update_interval, master_stop, node_id, my_socket), daemon = True)
     # The Routing Thread: Periodically (or on-demand) runs your Dijkstra logic and prints the table.
     destination_node = ""
     #r
@@ -269,10 +269,10 @@ casts the current update packet via STDOUT.
     except KeyboardInterrupt:
         master_stop.set()
     
-    listening_thread_network.join(daemon= True)
-    listening_thread_stdin.join(daemon= True)
-    sending_thread.join(daemon= True)
-    routing_thread.join(daemon= True)
+    # listening_thread_network.join(daemon= True)
+    # listening_thread_stdin.join(daemon= True)
+    # sending_thread.join(daemon= True)
+    # routing_thread.join(daemon= True)
     
 if __name__ == "__main__":
     main()

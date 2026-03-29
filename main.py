@@ -153,10 +153,13 @@ def get_path(prev, destination_node):
     while prev[current_node] != None:
         least_cost_path.append(prev[current_node])
         current_node = prev[current_node]
-        
-    least_cost_path.reverse()
-    return ''.join(least_cost_path)
     
+    
+    least_cost_path.reverse()
+    least_cost_path.append(destination_node)
+    
+    return ''.join(least_cost_path)
+        
 def read_config(node_config_file):
     
     neighbouring_nodes = []
@@ -177,17 +180,41 @@ def read_config(node_config_file):
             
     return neighbouring_nodes
 
-def handle_routing(routing_delay, stop_event, starting_node, destination_node):
+def handle_routing(routing_delay, stop_event, starting_node, destination_node, node_id):
     while not stop_event.is_set():
-    
-        dist, prev = dijkstras(starting_node)
-        path = get_path(prev, destination_node)
-        
-        
         stopped = stop_event.wait(routing_delay)
+
+        dist, prev = dijkstras(starting_node)
+        # path_string = get_path(prev, destination_node)
+        
+        
+        output_message = f"I am Node {node_id}\n"
+        # path_array = path_string.split()
+        
+        for node in sorted(graph):
+            if node != node_id:
+                
+                path = get_path(prev, node)
+                cost = dist[node]
+                output_message += f"Least cost path from {node_id} to {node}: {path}, link cost: {cost}"
+                
+                
+                # #the path to specific node
+                # node_path = path_array.split(node)
+                # node_path.append(node)
+
+                # # distance to specific node
+                # node_path_cost = dist[node]
+                
+                # output_message += f"Least cost path from {node_id} to {node}: {node_path}: link cost: {node_path_cost}"
+        print(output_message)
+                
+        
         
         if stopped:
             break
+
+
 
 def update_graph(neighbouring_nodes, source_node):
     
@@ -256,7 +283,7 @@ casts the current update packet via STDOUT.
     destination_node = ""
     #r
     
-    routing_thread = threading.Thread(target = handle_routing, args = (routing_delay, master_stop, node_id, destination_node), daemon = True)
+    routing_thread = threading.Thread(target = handle_routing, args = (routing_delay, master_stop, node_id, destination_node, node_id), daemon = True)
     
     listening_thread_stdin.start()
     listening_thread_network.start()

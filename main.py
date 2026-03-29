@@ -3,12 +3,11 @@ import os
 import threading
 import time
 import socket
-import heapq
 
 graph = {}
 
-def listening():
-    while True:
+def listening_stdin(node_id, master_stop):
+    while not master_stop.is_set():
         try:
             line = input().strip().split()
             print("Received: ", line)
@@ -16,34 +15,76 @@ def listening():
             if len(line) < 3:
                 print("too little inputs")
                 break
-            if line[0] != "UPDATE":
-                break
+            if line[0] == "UPDATE":
             
-            source_node = line[1]
-            neighbours_raw = line[2]
-            neighbours = neighbours_raw.split(",")
-        
-            graph[source_node] = {}
-                
-            for n in neighbours:
-                node, cost, port = n.split(":")
-                cost = float(cost)
-                port = int(port)
-                
-                if node not in graph:
-                    graph[node] = {}
-                
-                graph[source_node][node] = (cost, port)
-                graph[node][source_node] = (cost, port)
-    
+                source_node = line[1]
+                neighbours_raw = line[2]
+                neighbours = neighbours_raw.split(",")
             
+                graph[source_node] = {}
+                    
+                for n in neighbours:
+                    node, cost, port = n.split(":")
+                    cost = float(cost)
+                    port = int(port)
+                    
+                    if node not in graph:
+                        graph[node] = {}
+                    
+                    graph[source_node][node] = (cost, port)
+                    graph[node][source_node] = (cost, port)
+
+            if line[0] == "CHANGE":
+                pass
+                
+                
         except EOFError:
             print("Error in input")
             break
     return
 
+
+def listening_network(my_socket, stop_event):
+    while not stop_event.is_set():
+        try:
+            # 1. Wait for a packet (up to 4096 bytes)
+            data, addr = my_socket.recvfrom(4096)
+            
+            # 2. Convert bytes back to a string
+            message = data.decode().strip()
+            
+            # 3. Parse the message (just like you did in stdin)
+            # Example: "UPDATE B C:5.0:6002"
+            parts = message.split()
+            if parts[0] == "UPDATE":
+                # Extract source_node and neighbors exactly like your other thread
+                # Then update the 'graph' dictionary
+                
+                
+                source_node = parts[1]
+                neighbours_raw = parts[2]
+                neighbours = neighbours_raw.split(",")
+            
+                graph[source_node] = {}
+                    
+                for n in neighbours:
+                    node, cost, port = n.parts(":")
+                    cost = float(cost)
+                    port = int(port)
+                    
+                    if node not in graph:
+                        graph[node] = {}
+                    
+                    graph[source_node][node] = (cost, port)
+                    graph[node][source_node] = (cost, port)
+                    
+        except Exception as e:
+            if not stop_event.is_set():
+                print(f"Network error: {e}")
+            break
+
 def broadcast_updates(update_interval, stop_event, node_id):
-    while not broadcast_updates.is_set():
+    while not stop_event.is_set():
         
         update_message = f"UPDATE {node_id}"
         
@@ -130,7 +171,7 @@ def read_config(node_config_file):
                 continue
             
             node_id, cost, port_no = line.split(" ")
-            neighbouring_nodes.append(line.pslit(" "))
+            neighbouring_nodes.append(line.split(" "))
             
     return neighbouring_nodes
 
@@ -149,17 +190,17 @@ def handle_routing(routing_delay, stop_event, starting_node, destination_node):
 
 def update_graph(neighbouring_nodes, source_node):
     
-    if graph[source_node] not in graph:
+    if source_node not in graph:
         graph[source_node] = {}
     
     for node_id, cost, port_no in neighbouring_nodes:
         cost = float(cost)
-        port = int(port)
+        port_no = int(port_no)
         if node_id not in graph:
             graph[node_id] = {}
         
-        graph[source_node][node_id] = (cost, port)
-        graph[node_id][source_node] = (cost, port)
+        graph[source_node][node_id] = (cost, port_no)
+        graph[node_id][source_node] = (cost, port_no)
         
     return
 
@@ -194,26 +235,42 @@ casts the current update packet via STDOUT.
     update_graph(neighbouring_nodes, node_id)
     
     
+    # socket stuff
+    my_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    my_socket.bind(('localhost', port_number))
+    
+    
+    
+    # threadding stuff
     master_stop = threading.Event()
     
     # The Listening Thread: Monitors the "outside world" (STDIN for user commands and Sockets for other nodes).
 
-    listening_thread = threading.Thread(target = listening, args = (master_stop), daemon = True)
-    listening_thread.start()
+    listening_thread_stdin = threading.Thread(target = listening_stdin, args = (master_stop,), daemon = True)
+    listening_thread_network = threading.Thread(target = listening_network, args = (my_socket, master_stop,), daemon = True)
     # The Sending Thread: Wakes up every UpdateInterval seconds to shout your status to your neighbors.
 
 
     sending_thread = threading.Thread(target = broadcast_updates, args = (update_interval, master_stop, node_id), daemon = True)
-    sending_thread.start()
     # The Routing Thread: Periodically (or on-demand) runs your Dijkstra logic and prints the table.
     destination_node = ""
     #r
+    
     routing_thread = threading.Thread(target = handle_routing, args = (routing_delay, master_stop, node_id, destination_node), daemon = True)
+    
+    listening_thread_stdin.start()
+    listening_thread_network.start()
+    sending_thread.start()
     routing_thread.start()
     
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        master_stop.set()
     
-    
-    listening_thread.join(daemon= True)
+    listening_thread_network.join(daemon= True)
+    listening_thread_stdin.join(daemon= True)
     sending_thread.join(daemon= True)
     routing_thread.join(daemon= True)
     

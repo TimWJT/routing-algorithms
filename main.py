@@ -195,7 +195,7 @@ def handle_routing(routing_delay, stop_event, starting_node, destination_node, n
             if node != node_id:
                 
                 path = get_path(prev, node)
-                cost = dist[node]
+                cost = dist[node] - dist[node_id]
                 output_message += f"Least cost path from {node_id} to {node}: {path}, link cost: {cost}"
                 
                 

@@ -235,7 +235,7 @@ casts the current update packet via STDOUT.
     
     update_graph(neighbouring_nodes, node_id)
     
-    
+    #
     # socket stuff
     my_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     my_socket.bind(('localhost', int(port_number)))    

@@ -100,7 +100,7 @@ def broadcast_updates(update_interval, stop_event, node_id, my_socket):
         print(update_message) 
         
         stopped = stop_event.wait(update_interval)
-        
+        print(f"DEBUG sending: {update_message} to port {port}")
         
         if stopped:
             break
@@ -195,7 +195,7 @@ def handle_routing(routing_delay, stop_event, starting_node, destination_node, n
             if node != node_id:
                 
                 path = get_path(prev, node)
-                cost = dist[node] - dist[node_id]
+                cost = dist[node]
                 output_message += f"Least cost path from {node_id} to {node}: {path}, link cost: {cost}"
                 
                 

@@ -20,7 +20,6 @@ def listening_stdin(node_id, master_stop):
                 neighbours_raw = line[2]
                 neighbours = neighbours_raw.split(",")
 
-                graph[source_node] = {}
                     
                 with graph_lock:
                     graph[source_node] = {}
@@ -65,7 +64,6 @@ def listening_network(my_socket, stop_event, port_number):
                 neighbours_raw = parts[3]          # ← was parts[2]
                 neighbours = neighbours_raw.split(",")
             
-                graph[source_node] = {}
                 
                 with graph_lock:
                     graph[source_node] = {}
@@ -147,6 +145,8 @@ def dijkstras(starting_node):
     
 def get_path(prev, destination_node):
     
+    if prev[destination_node] is None:
+        return "UNREACHABLE"
     
     least_cost_path = []
     
@@ -182,39 +182,27 @@ def read_config(node_config_file):
             
     return neighbouring_nodes
 
-def handle_routing(routing_delay, stop_event, starting_node, destination_node, node_id):
+def handle_routing(routing_delay, stop_event, starting_node, node_id):
+    
+    # Wait once at startup
+    stop_event.wait(routing_delay)
+    
     while not stop_event.is_set():
-        stopped = stop_event.wait(routing_delay)
-
-        dist, prev = dijkstras(starting_node)
-        # path_string = get_path(prev, destination_node)
         
+        with graph_lock:
+            dist, prev = dijkstras(starting_node)
         
         output_message = f"I am Node {node_id}\n"
-        # path_array = path_string.split()
         
         for node in sorted(graph):
             if node != node_id:
-                
                 path = get_path(prev, node)
                 cost = dist[node]
-                output_message += f"Least cost path from {node_id} to {node}: {path}, link cost: {cost}"
-                
-                
-                # #the path to specific node
-                # node_path = path_array.split(node)
-                # node_path.append(node)
-
-                # # distance to specific node
-                # node_path_cost = dist[node]
-                
-                # output_message += f"Least cost path from {node_id} to {node}: {node_path}: link cost: {node_path_cost}"
+                output_message += f"Least cost path from {node_id} to {node}: {path}, link cost: {cost}\n"
+        
         print(output_message)
-                
         
-        
-        if stopped:
-            break
+        stop_event.wait(routing_delay)
 
 
 
@@ -285,8 +273,7 @@ casts the current update packet via STDOUT.
     destination_node = ""
     #r
     
-    routing_thread = threading.Thread(target = handle_routing, args = (routing_delay, master_stop, node_id, destination_node, node_id), daemon = True)
-    
+    routing_thread = threading.Thread(target = handle_routing, args = (routing_delay, master_stop, node_id, node_id), daemon = True)    
     listening_thread_stdin.start()
     listening_thread_network.start()
     sending_thread.start()

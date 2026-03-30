@@ -4,6 +4,7 @@ import threading
 import time
 import socket
 
+graph_lock = threading.Lock()  # ← add this
 graph = {}
 
 def listening_stdin(node_id, master_stop):
@@ -12,9 +13,7 @@ def listening_stdin(node_id, master_stop):
             line = input().strip().split()
             print("Received: ", line)
             
-            if len(line) < 3:
-                print("too little inputs")
-                break
+      
             if line[0] == "UPDATE":
             
                 source_node = line[1]
@@ -23,16 +22,16 @@ def listening_stdin(node_id, master_stop):
 
                 graph[source_node] = {}
                     
-                for n in neighbours:
-                    node, cost, port = n.split(":")
-                    cost = float(cost)
-                    port = int(port)
-                    
-                    if node not in graph:
-                        graph[node] = {}
-                    
-                    graph[source_node][node] = (cost, port)
-                    graph[node][source_node] = (cost, port)
+                with graph_lock:
+                    graph[source_node] = {}
+                    for n in neighbours:
+                        node, cost, port = n.split(":")
+                        cost = float(cost)
+                        port = int(port)
+                        if node not in graph:
+                            graph[node] = {}
+                        graph[source_node][node] = (cost, port)
+                        graph[node][source_node] = (cost, port)
 
             if line[0] == "CHANGE":
                 pass
@@ -44,7 +43,7 @@ def listening_stdin(node_id, master_stop):
     return
 
 
-def listening_network(my_socket, stop_event):
+def listening_network(my_socket, stop_event, port_number):
     while not stop_event.is_set():
         try:
             # 1. Wait for a packet (up to 4096 bytes)
@@ -62,49 +61,52 @@ def listening_network(my_socket, stop_event):
                 
                 
                 source_node = parts[1]
-                neighbours_raw = parts[2]
+                source_port = int(parts[2])        # ← new
+                neighbours_raw = parts[3]          # ← was parts[2]
                 neighbours = neighbours_raw.split(",")
             
                 graph[source_node] = {}
+                
+                with graph_lock:
+                    graph[source_node] = {}
+                    for n in neighbours:
+                        node, cost, port = n.split(":")
+                        cost = float(cost)
+                        port = int(port)
+                        if node not in graph:
+                            graph[node] = {}
+                        graph[source_node][node] = (cost, port)
+                        graph[node][source_node] = (cost, source_port)
                     
-                for n in neighbours:
-                    node, cost, port = n.split(":")
-                    cost = float(cost)
-                    port = int(port)
-                    
-                    if node not in graph:
-                        graph[node] = {}
-                    
-                    graph[source_node][node] = (cost, port)
-                    graph[node][source_node] = (cost, port)
                     
         except Exception as e:
             if not stop_event.is_set():
                 print(f"Network error: {e}")
             break
 
-def broadcast_updates(update_interval, stop_event, node_id, my_socket):
+def broadcast_updates(update_interval, stop_event, node_id, my_socket, port_number):
     while not stop_event.is_set():
         
-        update_message = f"UPDATE {node_id}"
+        update_message = f"UPDATE {node_id} "
+        neighbour_parts = []
+        with graph_lock:
+            for n in graph[node_id]:
+                cost, port = graph[node_id][n]
+                neighbour_parts.append(f"{n}:{cost}:{port}")
+                
+        update_message += ",".join(neighbour_parts)
         
-        
+                
         for n in graph[node_id]:
             cost, port = graph[node_id][n]
-            update_message += f" {n}:{cost}:{port},"        
+            socket_message = f"UPDATE {node_id} {port_number} " + ",".join(neighbour_parts)
+            my_socket.sendto(socket_message.encode(), ("localhost", port))
+          
         
-        for n in graph[node_id]:
-            cost, port = graph[node_id][n]
-            my_socket.sendto(update_message.encode(), ("localhost", port))
-            
         print(update_message) 
         
-        stopped = stop_event.wait(update_interval)
-        print(f"DEBUG sending: {update_message} to port {port}")
+        stop_event.wait(update_interval)
         
-        if stopped:
-            break
-    
 def dijkstras(starting_node):
     prev = {}
     dist = {}
@@ -274,11 +276,11 @@ casts the current update packet via STDOUT.
     # The Listening Thread: Monitors the "outside world" (STDIN for user commands and Sockets for other nodes).
 
     listening_thread_stdin = threading.Thread(target = listening_stdin, args = (node_id, master_stop,), daemon = True)
-    listening_thread_network = threading.Thread(target = listening_network, args = (my_socket, master_stop,), daemon = True)
+    listening_thread_network = threading.Thread(target = listening_network, args = (my_socket, master_stop, port_number), daemon = True)
     # The Sending Thread: Wakes up every UpdateInterval seconds to shout your status to your neighbors.
 
 
-    sending_thread = threading.Thread(target = broadcast_updates, args = (update_interval, master_stop, node_id, my_socket), daemon = True)
+    sending_thread = threading.Thread(target = broadcast_updates, args = (update_interval, master_stop, node_id, my_socket, port_number), daemon = True)
     # The Routing Thread: Periodically (or on-demand) runs your Dijkstra logic and prints the table.
     destination_node = ""
     #r

@@ -6,8 +6,9 @@ import socket
 
 graph_lock = threading.Lock()  # ← add this
 graph = {}
+routing_event = threading.Event()
 
-def listening_stdin(node_id, master_stop):
+def listening_stdin(node_id, master_stop, port_number):
     while not master_stop.is_set():
         try:
             line = input().strip().split()
@@ -33,8 +34,16 @@ def listening_stdin(node_id, master_stop):
                         graph[node][source_node] = (cost, port)
 
             if line[0] == "CHANGE":
-                pass
+                neighbour_id = line[1]
+                new_cost = float(line[2])
+            
+                with graph_lock:
+                    old_cost, port = graph[node_id][neighbour_id]
+                    graph[node_id][neighbour_id] = (new_cost, port)
+                    graph[neighbour_id][node_id] = (new_cost, 0)
+                routing_event.set()  # ← trigger immediate recalculation
                 
+            
                 
         except EOFError:
             print("Error in input")
@@ -192,22 +201,25 @@ def handle_routing(routing_delay, stop_event, starting_node, node_id):
     stop_event.wait(routing_delay)
     
     while not stop_event.is_set():
+        try:
+            with graph_lock:
+                dist, prev = dijkstras(starting_node)
+                nodes_snapshot = sorted(graph)  # ← take snapshot inside lock
+            
+            output_message = f"I am Node {node_id}\n"
+            
+            for node in nodes_snapshot:  # ← use snapshot not live graph
+                if node != node_id:
+                    path = get_path(prev, node)
+                    cost = dist[node]
+                    output_message += f"Least cost path from {node_id} to {node}: {path}, link cost: {cost}\n"
+            
+            print(output_message)
+        except Exception as e:
+            print(f"Routing error: {e}")  # ← this will tell us what's crashing
         
-        with graph_lock:
-            dist, prev = dijkstras(starting_node)
-        
-        output_message = f"I am Node {node_id}\n"
-        
-        for node in sorted(graph):
-            if node != node_id:
-                path = get_path(prev, node)
-                cost = dist[node]
-                output_message += f"Least cost path from {node_id} to {node}: {path}, link cost: {cost}\n"
-        
-        print(output_message)
-        
-        stop_event.wait(routing_delay)
-
+        routing_event.wait(timeout=routing_delay)
+        routing_event.clear()
 
 
 def update_graph(neighbouring_nodes, source_node):
@@ -267,7 +279,7 @@ casts the current update packet via STDOUT.
     
     # The Listening Thread: Monitors the "outside world" (STDIN for user commands and Sockets for other nodes).
 
-    listening_thread_stdin = threading.Thread(target = listening_stdin, args = (node_id, master_stop,), daemon = True)
+    listening_thread_stdin = threading.Thread(target = listening_stdin, args = (node_id, master_stop, port_number), daemon = True)
     listening_thread_network = threading.Thread(target = listening_network, args = (my_socket, master_stop, port_number), daemon = True)
     # The Sending Thread: Wakes up every UpdateInterval seconds to shout your status to your neighbors.
 

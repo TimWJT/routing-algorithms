@@ -128,6 +128,10 @@ def dijkstras(starting_node):
                 smallest_distance = dist[node]
                 current_node = node
 
+        if current_node is None:  # ← ADD THIS
+            break                 # ← no more reachable nodes, stop
+
+        
         visited.add(current_node)
 
         # Relax neighbours

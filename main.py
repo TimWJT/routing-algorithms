@@ -90,31 +90,25 @@ def listening_network(my_socket, stop_event, port_number):
             if not stop_event.is_set():
                 print(f"Network error: {e}")
             break
-
 def broadcast_updates(update_interval, stop_event, node_id, my_socket, port_number):
     while not stop_event.is_set():
         
-        update_message = f"UPDATE {node_id} "
         neighbour_parts = []
+        ports_to_send = []  # ← need to initialise this!
+        
         with graph_lock:
             for n in graph[node_id]:
                 cost, port = graph[node_id][n]
                 neighbour_parts.append(f"{n}:{cost}:{port}")
-                ports_to_send.append(port)  # ← save ports here too
-
-        for port in ports_to_send:
-            socket_message = f"UPDATE {node_id} {port_number} " + ",".join(neighbour_parts)
-            my_socket.sendto(socket_message.encode(), ("localhost", port))
-        update_message += ",".join(neighbour_parts)
+                ports_to_send.append(port)  # ← save ports inside lock
         
-                
-        for n in graph[node_id]:
-            cost, port = graph[node_id][n]
-            socket_message = f"UPDATE {node_id} {port_number} " + ",".join(neighbour_parts)
-            my_socket.sendto(socket_message.encode(), ("localhost", port))
-          
+        stdout_message = f"UPDATE {node_id} " + ",".join(neighbour_parts)
+        socket_message = f"UPDATE {node_id} {port_number} " + ",".join(neighbour_parts)
         
-        print(update_message) 
+        for port in ports_to_send:  # ← send using saved ports, outside lock
+            my_socket.sendto(socket_message.encode(), ("localhost", port))
+        
+        print(stdout_message)
         
         stop_event.wait(update_interval)
         

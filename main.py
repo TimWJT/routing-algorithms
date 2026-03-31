@@ -100,7 +100,11 @@ def broadcast_updates(update_interval, stop_event, node_id, my_socket, port_numb
             for n in graph[node_id]:
                 cost, port = graph[node_id][n]
                 neighbour_parts.append(f"{n}:{cost}:{port}")
-                
+                ports_to_send.append(port)  # ← save ports here too
+
+        for port in ports_to_send:
+            socket_message = f"UPDATE {node_id} {port_number} " + ",".join(neighbour_parts)
+            my_socket.sendto(socket_message.encode(), ("localhost", port))
         update_message += ",".join(neighbour_parts)
         
                 
@@ -259,7 +263,7 @@ casts the current update packet via STDOUT.
         sys.exit(1)
         
     node_id = sys.argv[1]
-    port_number = sys.argv[2]
+    port_number = int(sys.argv[2])
     node_config_file = sys.argv[3]
     routing_delay = float(sys.argv[4])
     update_interval = float(sys.argv[5])

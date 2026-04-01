@@ -25,7 +25,7 @@ def listening_stdin(node_id, master_stop, port_number, broadcast_event, node_dow
                     if source_node not in graph:
                         graph[source_node] = {}
                     
-                    current_time = time.time()  # Stamp new updates
+                    current_time = time.time()
                     for n in neighbours:
                         node, cost, port = n.split(":")
                         cost = float(cost)
@@ -38,15 +38,23 @@ def listening_stdin(node_id, master_stop, port_number, broadcast_event, node_dow
                 routing_event.set()  
 
             elif line[0] == "CHANGE":
+                if len(line) != 3:
+                    print("Error: Invalid command format. Expected exactly two tokens after CHANGE.", flush=True)
+                    os._exit(1)
+                    
                 neighbour_id = line[1]
-                new_cost = float(line[2])
+                try:
+                    new_cost = float(line[2])
+                except ValueError:
+                    print("Error: Invalid command format. Expected numeric cost value.", flush=True)
+                    os._exit(1)
             
                 with graph_lock:
                     port = 0
                     if neighbour_id in graph.get(node_id, {}):
                         _, port, _ = graph[node_id][neighbour_id]
                         
-                    current_time = time.time()  # Stamp the change
+                    current_time = time.time()
                     
                     if node_id not in graph: 
                         graph[node_id] = {}
@@ -57,15 +65,14 @@ def listening_stdin(node_id, master_stop, port_number, broadcast_event, node_dow
                     graph[neighbour_id][node_id] = (new_cost, port, current_time) 
                 
                 routing_event.set()
-                broadcast_event.set()  # Force immediate broadcast on change
-                
+                broadcast_event.set()
+
             elif line[0] == "FAIL":
                 if len(line) != 2:
                     print("Error: Invalid command format. Expected: FAIL <Node-ID>.", flush=True)
                     os._exit(1)
                     
                 target_node = line[1]
-                # Assuming valid Node-IDs are single characters based on the 'AB' error spec
                 if len(target_node) != 1 or not target_node.isalnum():
                     print("Error: Invalid command format. Expected a valid Node-ID.", flush=True)
                     os._exit(1)
@@ -78,7 +85,6 @@ def listening_stdin(node_id, master_stop, port_number, broadcast_event, node_dow
                         failed_nodes.add(target_node)
                     routing_event.set()
 
-            # --- NEW: RECOVER COMMAND ---
             elif line[0] == "RECOVER":
                 if len(line) != 2:
                     print("Error: Invalid command format. Expected: RECOVER <Node-ID>.", flush=True)
@@ -92,21 +98,27 @@ def listening_stdin(node_id, master_stop, port_number, broadcast_event, node_dow
                 if target_node == node_id:
                     node_down_event.clear()
                     print(f"Node {node_id} is now UP.", flush=True)
-                    broadcast_event.set()  # Force broadcast immediately upon waking up
+                    broadcast_event.set() 
                 else:
                     with graph_lock:
                         if target_node in failed_nodes:
                             failed_nodes.remove(target_node)
                     routing_event.set()
+                
         except EOFError:
             break
         except Exception:
             pass
     return
 
-def listening_network(my_socket, stop_event, port_number, node_id):
+def listening_network(my_socket, stop_event, port_number, node_id, node_down_event):
     while not stop_event.is_set():
         try:
+            if node_down_event.is_set():
+                # If down, clear the socket buffer but ignore the data
+                my_socket.recvfrom(4096)
+                continue
+                
             data, addr = my_socket.recvfrom(4096)
             message = data.decode().strip()
             parts = message.split()
@@ -130,20 +142,15 @@ def listening_network(my_socket, stop_event, port_number, node_id):
                     cost = float(n_parts[1])
                     port = int(n_parts[2])
                     
-                    # Safely extract timestamp if present, else fallback to 0.0
                     timestamp = float(n_parts[3]) if len(n_parts) > 3 else 0.0
-                    
-                    # Get the current known timestamp for this edge (-1.0 if unknown)
                     current_ts = graph[source_node].get(node, (0, 0, -1.0))[2]
                     
-                    # ONLY update if the incoming data is newer or equal
                     if timestamp >= current_ts:
                         if node not in graph:
                             graph[node] = {}
                         graph[source_node][node] = (cost, port, timestamp)
                         changes_made = True
                         
-                        # If this edge involves me, update my outgoing link too
                         if node == node_id:
                             my_ts = graph[node].get(source_node, (0, 0, -1.0))[2]
                             if timestamp >= my_ts:
@@ -157,22 +164,24 @@ def listening_network(my_socket, stop_event, port_number, node_id):
                 pass
             break
 
-def broadcast_updates(update_interval, stop_event, node_id, my_socket, port_number, broadcast_event):
+def broadcast_updates(update_interval, stop_event, node_id, my_socket, port_number, broadcast_event, node_down_event):
     last_stdout_message = ""
     
     while not stop_event.is_set():
+        if node_down_event.is_set():
+            broadcast_event.wait(timeout=update_interval)
+            broadcast_event.clear()
+            continue
+
         neighbour_parts_stdout = []
         neighbour_parts_socket = []
         ports_to_send = [] 
         
         with graph_lock:
             if node_id in graph:
-                # Sorted to ensure consistent STDOUT for the autograder
                 for n in sorted(graph[node_id].keys()):
                     cost, port, timestamp = graph[node_id][n]
                     neighbour_parts_stdout.append(f"{n}:{cost}:{port}")
-                    
-                    # Socket message gets the timestamp, STDOUT strictly does not
                     neighbour_parts_socket.append(f"{n}:{cost}:{port}:{timestamp}")
                     ports_to_send.append(port) 
         
@@ -187,34 +196,30 @@ def broadcast_updates(update_interval, stop_event, node_id, my_socket, port_numb
                     except Exception:
                         pass
             
-            # Only print if the topology actually changed, and flush it
             if stdout_message != last_stdout_message:
                 print(stdout_message, flush=True)
                 last_stdout_message = stdout_message
         
-        # Wait for the interval OR the manual broadcast_event trigger
         broadcast_event.wait(timeout=update_interval)
         broadcast_event.clear()
 
-def dijkstras(starting_node):
+def dijkstras(starting_node, failed_nodes):
     prev = {}
     dist = {}
     visited = set()
     
-    # Initialise
     for node in graph:
         dist[node] = float('inf')
         prev[node] = None
     
     dist[starting_node] = 0
 
-    # Main loop
     while len(visited) < len(graph):
         current_node = None
         smallest_distance = float('inf')
 
         for node in graph:
-            if node not in visited and dist[node] < smallest_distance:
+            if node not in visited and node not in failed_nodes and dist[node] < smallest_distance:
                 smallest_distance = dist[node]
                 current_node = node
 
@@ -223,10 +228,11 @@ def dijkstras(starting_node):
 
         visited.add(current_node)
 
-        # Relax neighbours
         for neighbour in graph[current_node]:
-            cost, port, timestamp = graph[current_node][neighbour]  # Unpack 3 values
-            
+            if neighbour in failed_nodes:
+                continue
+                
+            cost, port, timestamp = graph[current_node][neighbour]
             new_dist = dist[current_node] + cost
             
             if new_dist < dist[neighbour]:
@@ -254,45 +260,61 @@ def get_path(prev, destination_node):
 def read_config(node_config_file):
     neighbouring_nodes = []
     
+    if not os.path.exists(node_config_file):
+        print(f"Error: Configuration file {node_config_file} not found.", flush=True)
+        sys.exit(1)
+
     with open(node_config_file, "r") as file:
-        neighbour_entries = int(next(file).strip())
-        
+        try:
+            first_line = next(file).strip()
+            neighbour_entries = int(first_line)
+        except ValueError:
+            print("Error: Invalid configuration file format. (First line must be an integer.)", flush=True)
+            sys.exit(1)
+            
         for line in file:
             line = line.strip()
             if line == "":
                 continue
             
-            # Use split() instead of split(" ") to safely handle extra spaces
-            neighbouring_nodes.append(line.split())
+            parts = line.split()
+            if len(parts) != 3:
+                print("Error: Invalid configuration file format. (Each neighbour entry must have exactly three tokens; cost must be numeric.)", flush=True)
+                sys.exit(1)
+                
+            try:
+                float(parts[1]) 
+            except ValueError:
+                print("Error: Invalid configuration file format. (Each neighbour entry must have exactly three tokens; cost must be numeric.)", flush=True)
+                sys.exit(1)
+
+            neighbouring_nodes.append(parts)
             
     return neighbouring_nodes
 
-def handle_routing(routing_delay, stop_event, starting_node, node_id):
-    # Wait once at startup
+def handle_routing(routing_delay, stop_event, starting_node, node_id, failed_nodes, node_down_event):
     stop_event.wait(routing_delay)
     
     while not stop_event.is_set():
         try:
-            with graph_lock:
-                dist, prev = dijkstras(starting_node)
-                nodes_snapshot = sorted(graph)
-            
-            # Format cleanly as a list to avoid trailing empty lines
-            output_lines = [f"I am Node {node_id}"]
-            
-            for node in nodes_snapshot:
-                if node != node_id:
-                    path = get_path(prev, node)
-                    cost = dist[node]
-                    output_lines.append(f"Least cost path from {node_id} to {node}: {path}, link cost: {cost}")
-            
-            # flush=True forces the buffer to output immediately
-            print("\n".join(output_lines), flush=True)
+            if not node_down_event.is_set():
+                with graph_lock:
+                    dist, prev = dijkstras(starting_node, failed_nodes)
+                    nodes_snapshot = sorted(graph)
+                
+                output_lines = [f"I am Node {node_id}"]
+                
+                for node in nodes_snapshot:
+                    if node != node_id and node not in failed_nodes:
+                        path = get_path(prev, node)
+                        cost = dist[node]
+                        output_lines.append(f"Least cost path from {node_id} to {node}: {path}, link cost: {cost}")
+                
+                print("\n".join(output_lines), flush=True)
             
         except Exception:
             pass 
         
-        # Wait until triggered by an update
         routing_event.wait()
         routing_event.clear()
 
@@ -306,17 +328,25 @@ def update_graph(neighbouring_nodes, source_node):
         if node_id not in graph:
             graph[node_id] = {}
         
-        # Add 0.0 as the initial timestamp
         graph[source_node][node_id] = (cost, port_no, 0.0)
         graph[node_id][source_node] = (cost, port_no, 0.0)
 
 def main():
     if len(sys.argv) != 6:
-        print("Error: Insufficient arguments provided. Usage: ./Routing.sh <Node-ID> <Port-NO> <Node-Config-File> <RoutingDelay> <UpdateInterval>")
+        print("Error: Insufficient arguments provided. Usage: ./Routing.sh <Node-ID> <Port-NO> <Node-Config-File> <RoutingDelay> <UpdateInterval>", flush=True)
         sys.exit(1)
         
     node_id = sys.argv[1]
-    port_number = int(sys.argv[2])
+    if len(node_id) != 1 or not node_id.isalnum():
+        print("Error: Invalid Node-ID.", flush=True)
+        sys.exit(1)
+
+    try:
+        port_number = int(sys.argv[2])
+    except ValueError:
+        print("Error: Invalid Port number. Must be an integer.", flush=True)
+        sys.exit(1)
+
     node_config_file = sys.argv[3]
     routing_delay = float(sys.argv[4])
     update_interval = float(sys.argv[5])
@@ -324,20 +354,19 @@ def main():
     neighbouring_nodes = read_config(node_config_file)
     update_graph(neighbouring_nodes, node_id)
     
-    # Socket setup
     my_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     my_socket.bind(('localhost', port_number))    
     
-    # Threading setup
     master_stop = threading.Event()
-    broadcast_event = threading.Event() 
-    node_down_event = threading.Event()  # ← NEW: Tracks if THIS node is down
-    failed_nodes = set()                 # ← NEW: Tracks if OTHER nodes are down
+    broadcast_event = threading.Event()
+    node_down_event = threading.Event()
+    failed_nodes = set()
     
     listening_thread_stdin = threading.Thread(target=listening_stdin, args=(node_id, master_stop, port_number, broadcast_event, node_down_event, failed_nodes), daemon=True)
     listening_thread_network = threading.Thread(target=listening_network, args=(my_socket, master_stop, port_number, node_id, node_down_event), daemon=True)
     sending_thread = threading.Thread(target=broadcast_updates, args=(update_interval, master_stop, node_id, my_socket, port_number, broadcast_event, node_down_event), daemon=True)
-    routing_thread = threading.Thread(target=handle_routing, args=(routing_delay, master_stop, node_id, node_id, failed_nodes, node_down_event), daemon=True)
+    routing_thread = threading.Thread(target=handle_routing, args=(routing_delay, master_stop, node_id, node_id, failed_nodes, node_down_event), daemon=True)    
+    
     listening_thread_stdin.start()
     listening_thread_network.start()
     sending_thread.start()

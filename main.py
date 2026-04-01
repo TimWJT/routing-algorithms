@@ -8,7 +8,7 @@ graph_lock = threading.Lock()
 graph = {}
 routing_event = threading.Event()
 
-def listening_stdin(node_id, master_stop, port_number, broadcast_event):
+def listening_stdin(node_id, master_stop, port_number, broadcast_event, node_down_event, failed_nodes):
     while not master_stop.is_set():
         try:
             raw_input = input()

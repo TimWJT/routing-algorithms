@@ -115,7 +115,6 @@ def listening_network(my_socket, stop_event, port_number, node_id, node_down_eve
     while not stop_event.is_set():
         try:
             if node_down_event.is_set():
-                # If down, clear the socket buffer but ignore the data
                 my_socket.recvfrom(4096)
                 continue
                 
@@ -143,19 +142,24 @@ def listening_network(my_socket, stop_event, port_number, node_id, node_down_eve
                     port = int(n_parts[2])
                     
                     timestamp = float(n_parts[3]) if len(n_parts) > 3 else 0.0
-                    current_ts = graph[source_node].get(node, (0, 0, -1.0))[2]
                     
-                    if timestamp >= current_ts:
+                    # Safely get current data (defaults to None if edge doesn't exist)
+                    current_data = graph[source_node].get(node)
+                    
+                    # ONLY update if: it's a new edge, it has a newer timestamp, or the cost is physically different
+                    if current_data is None or timestamp > current_data[2] or (timestamp == current_data[2] and cost != current_data[0]):
                         if node not in graph:
                             graph[node] = {}
                         graph[source_node][node] = (cost, port, timestamp)
                         changes_made = True
                         
+                        # Update our own outgoing link if the incoming update involves us
                         if node == node_id:
-                            my_ts = graph[node].get(source_node, (0, 0, -1.0))[2]
-                            if timestamp >= my_ts:
+                            my_data = graph[node].get(source_node)
+                            if my_data is None or timestamp > my_data[2] or (timestamp == my_data[2] and cost != my_data[0]):
                                 graph[node][source_node] = (cost, source_port, timestamp)
                                 
+            # Only wake up the routing thread if actual changes were made to the graph
             if changes_made:
                 routing_event.set() 
                 
@@ -163,14 +167,15 @@ def listening_network(my_socket, stop_event, port_number, node_id, node_down_eve
             if not stop_event.is_set():
                 pass
             break
-
 def broadcast_updates(update_interval, stop_event, node_id, my_socket, port_number, broadcast_event, node_down_event):
     last_stdout_message = ""
     
     while not stop_event.is_set():
+        # WAIT FIRST: This ensures the routing table prints at startup before the first broadcast
+        broadcast_event.wait(timeout=update_interval)
+        broadcast_event.clear()
+        
         if node_down_event.is_set():
-            broadcast_event.wait(timeout=update_interval)
-            broadcast_event.clear()
             continue
 
         neighbour_parts_stdout = []
@@ -199,9 +204,6 @@ def broadcast_updates(update_interval, stop_event, node_id, my_socket, port_numb
             if stdout_message != last_stdout_message:
                 print(stdout_message, flush=True)
                 last_stdout_message = stdout_message
-        
-        broadcast_event.wait(timeout=update_interval)
-        broadcast_event.clear()
 
 def dijkstras(starting_node, failed_nodes):
     prev = {}

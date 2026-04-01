@@ -59,6 +59,45 @@ def listening_stdin(node_id, master_stop, port_number, broadcast_event):
                 routing_event.set()
                 broadcast_event.set()  # Force immediate broadcast on change
                 
+            elif line[0] == "FAIL":
+                if len(line) != 2:
+                    print("Error: Invalid command format. Expected: FAIL <Node-ID>.", flush=True)
+                    os._exit(1)
+                    
+                target_node = line[1]
+                # Assuming valid Node-IDs are single characters based on the 'AB' error spec
+                if len(target_node) != 1 or not target_node.isalnum():
+                    print("Error: Invalid command format. Expected a valid Node-ID.", flush=True)
+                    os._exit(1)
+                    
+                if target_node == node_id:
+                    node_down_event.set()
+                    print(f"Node {node_id} is now DOWN.", flush=True)
+                else:
+                    with graph_lock:
+                        failed_nodes.add(target_node)
+                    routing_event.set()
+
+            # --- NEW: RECOVER COMMAND ---
+            elif line[0] == "RECOVER":
+                if len(line) != 2:
+                    print("Error: Invalid command format. Expected: RECOVER <Node-ID>.", flush=True)
+                    os._exit(1)
+                    
+                target_node = line[1]
+                if len(target_node) != 1 or not target_node.isalnum():
+                    print("Error: Invalid command format. Expected a valid Node-ID.", flush=True)
+                    os._exit(1)
+                    
+                if target_node == node_id:
+                    node_down_event.clear()
+                    print(f"Node {node_id} is now UP.", flush=True)
+                    broadcast_event.set()  # Force broadcast immediately upon waking up
+                else:
+                    with graph_lock:
+                        if target_node in failed_nodes:
+                            failed_nodes.remove(target_node)
+                    routing_event.set()
         except EOFError:
             break
         except Exception:
@@ -291,13 +330,14 @@ def main():
     
     # Threading setup
     master_stop = threading.Event()
-    broadcast_event = threading.Event()  # Event to force immediate broadcasts
+    broadcast_event = threading.Event() 
+    node_down_event = threading.Event()  # ← NEW: Tracks if THIS node is down
+    failed_nodes = set()                 # ← NEW: Tracks if OTHER nodes are down
     
-    listening_thread_stdin = threading.Thread(target=listening_stdin, args=(node_id, master_stop, port_number, broadcast_event), daemon=True)
-    listening_thread_network = threading.Thread(target=listening_network, args=(my_socket, master_stop, port_number, node_id), daemon=True)
-    sending_thread = threading.Thread(target=broadcast_updates, args=(update_interval, master_stop, node_id, my_socket, port_number, broadcast_event), daemon=True)
-    routing_thread = threading.Thread(target=handle_routing, args=(routing_delay, master_stop, node_id, node_id), daemon=True)    
-    
+    listening_thread_stdin = threading.Thread(target=listening_stdin, args=(node_id, master_stop, port_number, broadcast_event, node_down_event, failed_nodes), daemon=True)
+    listening_thread_network = threading.Thread(target=listening_network, args=(my_socket, master_stop, port_number, node_id, node_down_event), daemon=True)
+    sending_thread = threading.Thread(target=broadcast_updates, args=(update_interval, master_stop, node_id, my_socket, port_number, broadcast_event, node_down_event), daemon=True)
+    routing_thread = threading.Thread(target=handle_routing, args=(routing_delay, master_stop, node_id, node_id, failed_nodes, node_down_event), daemon=True)
     listening_thread_stdin.start()
     listening_thread_network.start()
     sending_thread.start()
